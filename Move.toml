@@ -1,0 +1,10 @@
+[package]
+name = "longshot_jackpot"
+version = "1.0.0"
+
+[addresses]
+admin = "0xB00"
+rtmtree = "0xBADC0DE"
+
+[dependencies]
+AptosTokenObjects = { git = "https://github.com/aptos-labs/aptos-core.git", subdir = "aptos-move/framework/aptos-token-objects/", rev = "aptos-cli-v2.1.0" }
