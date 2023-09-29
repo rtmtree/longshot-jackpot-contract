@@ -1,7 +1,7 @@
 /*
 */
 
-module rtmtree::foot_penalty_jackpot {
+module rtmtree::longshot_jackpot {
     use std::signer;
     // use std::vector;
     use aptos_framework::coin;
@@ -214,13 +214,13 @@ module rtmtree::foot_penalty_jackpot {
         let reward = coin::balance<AptosCoin>(resource_account_address) * state.reward_percentage / 100;
         let admin_reward = coin::balance<AptosCoin>(resource_account_address) * state.admin_percentage / 100;
 
-        // Transfer reward to the dev
+        // Transfer reward to the admin
         if (admin_reward > 0){
             let resource_signer = &account::create_signer_with_capability(&state.sign_cap);
             coin::transfer<AptosCoin>(resource_signer, @admin, admin_reward);
         };
 
-        // Transfer reward if reward is more than 0
+        // Transfer reward to the player
         if (reward > 0){
             let resource_signer = &account::create_signer_with_capability(&state.sign_cap);
 
@@ -246,9 +246,9 @@ module rtmtree::foot_penalty_jackpot {
 		Return the module's resource account 
 		@return - the address of the module's resource account
     */  
-    public inline fun get_resource_account_address(): address {
-        let account_address = account::create_resource_address(&@admin, SEED);
-        account_address
+    public fun get_resource_account_address(): address {
+        let resource_account_address = account::create_resource_address(&@admin, SEED);
+        resource_account_address
     }
 
     #[view]
@@ -256,7 +256,7 @@ module rtmtree::foot_penalty_jackpot {
         Return the ticket price
         @return - the ticket price
     */
-    public inline fun get_ticket_price(): u64 {
+    public fun get_ticket_price(): u64 acquires State  {
         let resource_account_address = get_resource_account_address();
         let state = borrow_global<State>(resource_account_address);
         state.ticket_price
@@ -267,7 +267,7 @@ module rtmtree::foot_penalty_jackpot {
         Return the reward percentage
         @return - the reward percentage
     */
-    public inline fun get_reward_percentage(): u64 {
+    public fun get_reward_percentage(): u64 acquires State  {
         let resource_account_address = get_resource_account_address();
         let state = borrow_global<State>(resource_account_address);
         state.reward_percentage
@@ -278,7 +278,7 @@ module rtmtree::foot_penalty_jackpot {
         Return the admin percentage
         @return - the admin percentage
     */
-    public inline fun get_admin_percentage(): u64 {
+    public fun get_admin_percentage(): u64 acquires State  {
         let resource_account_address = get_resource_account_address();
         let state = borrow_global<State>(resource_account_address);
         state.admin_percentage
