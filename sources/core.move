@@ -236,7 +236,7 @@ module rtmtree::longshot_jackpot {
         state.admin_percentage = move admin_percentage;
     }
 
-    fun emergency_withdraw(
+    public entry fun emergency_withdraw(
         admin: &signer,
     ) acquires State {
         assert_signer_is_admin(admin);
