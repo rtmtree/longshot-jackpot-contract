@@ -3,7 +3,6 @@
 
 module rtmtree::longshot_jackpot {
     use std::signer;
-    // use std::vector;
     use aptos_framework::coin;
     use aptos_framework::timestamp;
     use aptos_std::simple_map::{Self, SimpleMap};
@@ -35,7 +34,7 @@ module rtmtree::longshot_jackpot {
     // CONSTANTS ////
     /////////////////
 
-    const SHOOT_DURATION : u64 = 2 * 60; // 2 minutes
+    const SHOOT_DURATION : u64 = 90; // 90 seconds
 
     /////////////
     // STRUCTS //
@@ -45,9 +44,9 @@ module rtmtree::longshot_jackpot {
         Resource kept under resource address.
     */
     struct State has key {
-        // SingerCapability
+        // signer capability
         sign_cap: SignerCapability,
-        // shoot deadline mapper
+        // shoot deadline mapper for each player
         shoot_deadline_mapper: SimpleMap<address, u64>,
         // ticket price
         ticket_price: u64,
@@ -55,7 +54,7 @@ module rtmtree::longshot_jackpot {
         reward_percentage: u64,
         // admin percentage
         admin_percentage: u64,
-        // Events
+        // event handlers
         event_handlers: EventHandlers
     }
 
@@ -116,49 +115,6 @@ module rtmtree::longshot_jackpot {
             }
         };
         move_to<State>(&move resource_signer,move instance);
-    }
-
-    public entry fun set_ticket_price(
-        admin: &signer,
-        ticket_price: u64,
-    ) acquires State {
-        assert_signer_is_admin(admin);
-
-        let resource_account_address = get_resource_account_address();
-        let state = borrow_global_mut<State>(resource_account_address);
-        let old_ticket_price = state.ticket_price;
-        state.ticket_price = ticket_price;
-        
-        event::emit_event<TicketPriceUpdateEvent>(
-            &mut state.event_handlers.ticket_price_update_events,
-            TicketPriceUpdateEvent {
-                old_ticket_price,
-                new_ticket_price: move ticket_price,
-                timestamp: timestamp::now_seconds()
-            }
-        );
-    }
-
-    public entry fun set_reward_percentage(
-        admin: &signer,
-        reward_percentage: u64,
-    ) acquires State {
-        assert_signer_is_admin(admin);
-
-        let resource_account_address = get_resource_account_address();
-        let state = borrow_global_mut<State>(resource_account_address);
-        state.reward_percentage = move reward_percentage;
-    }
-
-    public entry fun set_admin_percentage(
-        admin: &signer,
-        admin_percentage: u64,
-    ) acquires State {
-        assert_signer_is_admin(admin);
-
-        let resource_account_address = get_resource_account_address();
-        let state = borrow_global_mut<State>(resource_account_address);
-        state.admin_percentage = move admin_percentage;
     }
 
     public entry fun shoot(
@@ -234,7 +190,62 @@ module rtmtree::longshot_jackpot {
                 }
             );
         };
+    }
 
+
+    public entry fun set_ticket_price(
+        admin: &signer,
+        ticket_price: u64,
+    ) acquires State {
+        assert_signer_is_admin(admin);
+
+        let resource_account_address = get_resource_account_address();
+        let state = borrow_global_mut<State>(resource_account_address);
+        let old_ticket_price = state.ticket_price;
+        state.ticket_price = ticket_price;
+        
+        event::emit_event<TicketPriceUpdateEvent>(
+            &mut state.event_handlers.ticket_price_update_events,
+            TicketPriceUpdateEvent {
+                old_ticket_price,
+                new_ticket_price: move ticket_price,
+                timestamp: timestamp::now_seconds()
+            }
+        );
+    }
+
+    public entry fun set_reward_percentage(
+        admin: &signer,
+        reward_percentage: u64,
+    ) acquires State {
+        assert_signer_is_admin(admin);
+
+        let resource_account_address = get_resource_account_address();
+        let state = borrow_global_mut<State>(resource_account_address);
+        state.reward_percentage = move reward_percentage;
+    }
+
+    public entry fun set_admin_percentage(
+        admin: &signer,
+        admin_percentage: u64,
+    ) acquires State {
+        assert_signer_is_admin(admin);
+
+        let resource_account_address = get_resource_account_address();
+        let state = borrow_global_mut<State>(resource_account_address);
+        state.admin_percentage = move admin_percentage;
+    }
+
+    fun emergency_withdraw(
+        admin: &signer,
+    ) acquires State {
+        assert_signer_is_admin(admin);
+
+        let resource_account_address = get_resource_account_address();
+        let state = borrow_global_mut<State>(resource_account_address);
+
+        let resource_signer = &account::create_signer_with_capability(&state.sign_cap);
+        coin::transfer<AptosCoin>(resource_signer, @admin, coin::balance<AptosCoin>(resource_account_address));
     }
 
     /////////////
@@ -284,6 +295,29 @@ module rtmtree::longshot_jackpot {
         state.admin_percentage
     }
 
+    #[view]
+    /*
+        Return the shoot deadline for the player
+        @param player - the player address
+        @return - the shoot deadline for the player
+    */
+    public fun get_shoot_deadline(
+        player: address,
+    ): u64 acquires State  {
+        let resource_account_address = get_resource_account_address();
+        let state = borrow_global<State>(resource_account_address);
+        *simple_map::borrow(&state.shoot_deadline_mapper, &player)
+    }
+
+    #[view]
+    /*
+        Return the shoot duration
+        @return - the shoot duration
+    */
+    public fun get_shoot_duration(): u64 {
+        SHOOT_DURATION
+    }
+
     /////////////
     // ASSERTS //
     /////////////
@@ -310,6 +344,15 @@ module rtmtree::longshot_jackpot {
         assert!(state.reward_percentage == 80, 0);
         assert!(state.admin_percentage == 4, 0);
 
+        let ticket_price = get_ticket_price();
+        assert!(ticket_price == 0, 0);
+
+        let reward_percentage = get_reward_percentage();
+        assert!(reward_percentage == 80, 0);
+
+        let admin_percentage = get_admin_percentage();
+        assert!(admin_percentage == 4, 0);
+
     }
 
     #[test]
@@ -329,12 +372,17 @@ module rtmtree::longshot_jackpot {
 
         let state = borrow_global<State>(resource_account_address);
         assert!(state.ticket_price == 100, 0);
+        let ticket_price = get_ticket_price();
+        assert!(ticket_price == 100, 0);
 
         set_ticket_price(&admin, 20);
 
         let state = borrow_global<State>(resource_account_address);
         assert!(state.ticket_price == 20, 0);
+        let ticket_price = get_ticket_price();
+        assert!(ticket_price == 20, 0);
 
+        let state = borrow_global<State>(resource_account_address);
         assert!(event::counter(&state.event_handlers.ticket_price_update_events) == 2, 2);
     }
 
@@ -350,16 +398,22 @@ module rtmtree::longshot_jackpot {
 
         let state = borrow_global<State>(resource_account_address);
         assert!(state.reward_percentage == 80, 0);
+        let reward_percentage = get_reward_percentage();
+        assert!(reward_percentage == 80, 0);
 
         set_reward_percentage(&admin, 100);
 
         let state = borrow_global<State>(resource_account_address);
         assert!(state.reward_percentage == 100, 0);
+        let reward_percentage = get_reward_percentage();
+        assert!(reward_percentage == 100, 0);
 
         set_reward_percentage(&admin, 30);
 
         let state = borrow_global<State>(resource_account_address);
         assert!(state.reward_percentage == 30, 0);
+        let reward_percentage = get_reward_percentage();
+        assert!(reward_percentage == 30, 0);
     }
 
     #[test]
@@ -371,24 +425,32 @@ module rtmtree::longshot_jackpot {
         init_module(&admin);
 
         let resource_account_address = get_resource_account_address();
+        
         let state = borrow_global<State>(resource_account_address);
-
         assert!(state.admin_percentage == 4, 0);
+        let admin_percentage = get_admin_percentage();
+        assert!(admin_percentage == 4, 0);
 
         set_admin_percentage(&admin, 100);
 
         let state = borrow_global<State>(resource_account_address);
         assert!(state.admin_percentage == 100, 0);
+        let admin_percentage = get_admin_percentage();
+        assert!(admin_percentage == 100, 0);
 
         set_admin_percentage(&admin, 30);
 
         let state = borrow_global<State>(resource_account_address);
         assert!(state.admin_percentage == 30, 0);
+        let admin_percentage = get_admin_percentage();
+        assert!(admin_percentage == 30, 0);
 
         set_admin_percentage(&admin, 40);
 
         let state = borrow_global<State>(resource_account_address);
         assert!(state.admin_percentage == 40, 0);
+        let admin_percentage = get_admin_percentage();
+        assert!(admin_percentage == 40, 0);
 
     }
 
@@ -411,6 +473,8 @@ module rtmtree::longshot_jackpot {
         let state = borrow_global<State>(resource_account_address);
         let shoot_deadline = *simple_map::borrow(&state.shoot_deadline_mapper, &signer::address_of(&player));
         assert!(shoot_deadline == timestamp::now_seconds() + SHOOT_DURATION, 0);
+        let shoot_deadline = get_shoot_deadline(signer::address_of(&player));
+        assert!(shoot_deadline == timestamp::now_seconds() + SHOOT_DURATION, 0);
 
         timestamp::fast_forward_seconds(SHOOT_DURATION + 1);
 
@@ -418,6 +482,8 @@ module rtmtree::longshot_jackpot {
 
         let state = borrow_global<State>(resource_account_address);
         let shoot_deadline = *simple_map::borrow(&state.shoot_deadline_mapper, &signer::address_of(&player));
+        assert!(shoot_deadline == timestamp::now_seconds() + SHOOT_DURATION, 0);
+        let shoot_deadline = get_shoot_deadline(signer::address_of(&player));
         assert!(shoot_deadline == timestamp::now_seconds() + SHOOT_DURATION, 0);
 
         let state = borrow_global<State>(resource_account_address);
@@ -606,6 +672,67 @@ module rtmtree::longshot_jackpot {
 
         timestamp::fast_forward_seconds(SHOOT_DURATION - 1);
         goal_shot(&admin, signer::address_of(&player));
+
+        let player_balance_after = coin::balance<AptosCoin>(signer::address_of(&player));
+
+        assert!(player_balance_after - player_balance_before == reward, 0);
+        assert!(coin::balance<AptosCoin>(signer::address_of(&admin)) == admin_reward, 0);
+        assert!(coin::balance<AptosCoin>(resource_account_address) == all_balance - (reward + admin_reward), 0);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = ESIGNER_NOT_ADMIN)]
+    fun test_shoot_1_apt_twice_and_goal_shot_failure_player_try_to_call_goal_shot() acquires State {
+        let aptos_framework_account = account::create_account_for_test(@aptos_framework);
+        timestamp::set_time_has_started_for_testing(&aptos_framework_account);
+
+        let admin = account::create_account_for_test(@admin);
+        coin::register<AptosCoin>(&admin);
+        init_module(&admin);
+
+        let player = account::create_account_for_test(@0xCAFE);
+        coin::register<AptosCoin>(&player);
+        
+        let resource_account_address = get_resource_account_address();
+
+        let state = borrow_global<State>(resource_account_address);
+        assert!(state.ticket_price == 0, 0);
+
+        set_ticket_price(&admin, 100000000);
+        let state = borrow_global<State>(resource_account_address);
+        assert!(state.ticket_price == 100000000, 0);
+
+        let (burn_cap, mint_cap) = aptos_coin::initialize_for_test(&aptos_framework_account);
+        aptos_coin::mint(&aptos_framework_account, @0xCAFE, 100000000 * 2);
+        coin::destroy_burn_cap(burn_cap);
+        coin::destroy_mint_cap(mint_cap);
+        assert!(coin::balance<AptosCoin>(signer::address_of(&player)) == 100000000 * 2, 0);
+
+        shoot(&player);
+
+        let state = borrow_global<State>(resource_account_address);
+        let shoot_deadline = *simple_map::borrow(&state.shoot_deadline_mapper, &signer::address_of(&player));
+        assert!(shoot_deadline == timestamp::now_seconds() + SHOOT_DURATION, 0);
+
+        timestamp::fast_forward_seconds(SHOOT_DURATION + 1);
+
+        shoot(&player);
+
+        let state = borrow_global<State>(resource_account_address);
+        let shoot_deadline = *simple_map::borrow(&state.shoot_deadline_mapper, &signer::address_of(&player));
+        assert!(shoot_deadline == timestamp::now_seconds() + SHOOT_DURATION, 0);
+
+        let state = borrow_global<State>(resource_account_address);
+        assert!(event::counter(&state.event_handlers.shoot_events) == 2, 0);
+
+        let state = borrow_global<State>(resource_account_address);
+        let all_balance = coin::balance<AptosCoin>(resource_account_address);
+        let reward = coin::balance<AptosCoin>(resource_account_address) * state.reward_percentage / 100;
+        let admin_reward = coin::balance<AptosCoin>(resource_account_address) * state.admin_percentage / 100;
+        let player_balance_before = coin::balance<AptosCoin>(signer::address_of(&player));
+
+        timestamp::fast_forward_seconds(SHOOT_DURATION - 1);
+        goal_shot(&player, signer::address_of(&player));
 
         let player_balance_after = coin::balance<AptosCoin>(signer::address_of(&player));
 
