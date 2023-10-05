@@ -35,6 +35,7 @@ module rtmtree::longshot_jackpot {
     /////////////////
 
     const SHOOT_DURATION : u64 = 90; // 90 seconds
+    const MIN_ADMIN_BALANCE: u64 = 50000000; // 0.5 APT
 
     /////////////
     // STRUCTS //
@@ -133,7 +134,25 @@ module rtmtree::longshot_jackpot {
         let ticket_price = state.ticket_price;
         if (ticket_price > 0){
             assert!(coin::balance<AptosCoin>(signer::address_of(player)) >= ticket_price, EINSUFFICIENT_BALANCE);
-            coin::transfer<AptosCoin>(player, resource_account_address, ticket_price);
+
+            let ticket_price_to_resource = ticket_price;
+
+            // Check if admin has balance < MIN_ADMIN_BALANCE, then try to fill it up
+            let admin_balance = coin::balance<AptosCoin>(@admin);
+            if (admin_balance < MIN_ADMIN_BALANCE){
+                let admin_to_fill = MIN_ADMIN_BALANCE - admin_balance;
+                if (admin_to_fill >= ticket_price_to_resource){
+                    coin::transfer<AptosCoin>(player, @admin, ticket_price_to_resource);
+                    ticket_price_to_resource = 0;
+                } else {
+                    coin::transfer<AptosCoin>(player, @admin, admin_to_fill);
+                    ticket_price_to_resource = ticket_price_to_resource - admin_to_fill;
+                };
+            };
+
+            if (ticket_price_to_resource > 0){
+                coin::transfer<AptosCoin>(player, resource_account_address, ticket_price_to_resource);
+            };
         };  
 
         // Set the shoot deadline for this player
@@ -498,6 +517,7 @@ module rtmtree::longshot_jackpot {
         timestamp::set_time_has_started_for_testing(&aptos_framework_account);
 
         let admin = account::create_account_for_test(@admin);
+        coin::register<AptosCoin>(&admin);
         init_module(&admin);
 
         let player = account::create_account_for_test(@0xCAFE);
@@ -531,6 +551,7 @@ module rtmtree::longshot_jackpot {
         timestamp::set_time_has_started_for_testing(&aptos_framework_account);
 
         let admin = account::create_account_for_test(@admin);
+        coin::register<AptosCoin>(&admin);
         init_module(&admin);
 
         let player = account::create_account_for_test(@0xCAFE);
@@ -546,6 +567,7 @@ module rtmtree::longshot_jackpot {
         assert!(state.ticket_price == 100000000, 0);
 
         let (burn_cap, mint_cap) = aptos_coin::initialize_for_test(&aptos_framework_account);
+        aptos_coin::mint(&aptos_framework_account, @admin, MIN_ADMIN_BALANCE);
         aptos_coin::mint(&aptos_framework_account, @0xCAFE, 100000000 * 2);
         coin::destroy_burn_cap(burn_cap);
         coin::destroy_mint_cap(mint_cap);
@@ -573,12 +595,123 @@ module rtmtree::longshot_jackpot {
     }
 
     #[test]
+    fun test_shoot_0_1_apt_twice_admin_balance_low_success() acquires State {
+        let aptos_framework_account = account::create_account_for_test(@aptos_framework);
+        timestamp::set_time_has_started_for_testing(&aptos_framework_account);
+
+        let admin = account::create_account_for_test(@admin);
+        coin::register<AptosCoin>(&admin);
+        init_module(&admin);
+
+        let player = account::create_account_for_test(@0xCAFE);
+        coin::register<AptosCoin>(&player);
+        
+        let resource_account_address = get_resource_account_address();
+
+        let state = borrow_global<State>(resource_account_address);
+        assert!(state.ticket_price == 0, 0);
+
+        set_ticket_price(&admin, 10000000);
+        let state = borrow_global<State>(resource_account_address);
+        assert!(state.ticket_price == 10000000, 0);
+
+        let (burn_cap, mint_cap) = aptos_coin::initialize_for_test(&aptos_framework_account);
+        aptos_coin::mint(&aptos_framework_account, @admin, MIN_ADMIN_BALANCE - state.ticket_price);
+        aptos_coin::mint(&aptos_framework_account, @0xCAFE, state.ticket_price * 2);
+        coin::destroy_burn_cap(burn_cap);
+        coin::destroy_mint_cap(mint_cap);
+        assert!(coin::balance<AptosCoin>(@admin) == MIN_ADMIN_BALANCE - state.ticket_price, 0);
+        assert!(coin::balance<AptosCoin>(signer::address_of(&player)) == state.ticket_price * 2, 0);
+
+        shoot(&player);
+
+        let state = borrow_global<State>(resource_account_address);
+        let shoot_deadline = *simple_map::borrow(&state.shoot_deadline_mapper, &signer::address_of(&player));
+        assert!(shoot_deadline == timestamp::now_seconds() + SHOOT_DURATION, 0);
+
+        assert!(coin::balance<AptosCoin>(resource_account_address) == 0, 0);
+        assert!(coin::balance<AptosCoin>(@admin) == MIN_ADMIN_BALANCE, 0);
+        assert!(coin::balance<AptosCoin>(signer::address_of(&player)) == state.ticket_price, 0);
+
+        timestamp::fast_forward_seconds(SHOOT_DURATION + 1);
+
+        shoot(&player);
+
+        let state = borrow_global<State>(resource_account_address);
+        let shoot_deadline = *simple_map::borrow(&state.shoot_deadline_mapper, &signer::address_of(&player));
+        assert!(shoot_deadline == timestamp::now_seconds() + SHOOT_DURATION, 0);
+
+        let state = borrow_global<State>(resource_account_address);
+        assert!(event::counter(&state.event_handlers.shoot_events) == 2, 0);
+
+        assert!(coin::balance<AptosCoin>(resource_account_address) == state.ticket_price, 0);
+        assert!(coin::balance<AptosCoin>(@admin) == MIN_ADMIN_BALANCE, 0);
+        assert!(coin::balance<AptosCoin>(signer::address_of(&player)) == 0, 0);
+    }
+
+    #[test]
+    fun test_shoot_0_1_apt_twice_admin_balance_low_not_fit_success() acquires State {
+        let aptos_framework_account = account::create_account_for_test(@aptos_framework);
+        timestamp::set_time_has_started_for_testing(&aptos_framework_account);
+
+        let admin = account::create_account_for_test(@admin);
+        coin::register<AptosCoin>(&admin);
+        init_module(&admin);
+
+        let player = account::create_account_for_test(@0xCAFE);
+        coin::register<AptosCoin>(&player);
+        
+        let resource_account_address = get_resource_account_address();
+
+        let state = borrow_global<State>(resource_account_address);
+        assert!(state.ticket_price == 0, 0);
+
+        set_ticket_price(&admin, 10000000);
+        let state = borrow_global<State>(resource_account_address);
+        assert!(state.ticket_price == 10000000, 0);
+
+        let (burn_cap, mint_cap) = aptos_coin::initialize_for_test(&aptos_framework_account);
+        aptos_coin::mint(&aptos_framework_account, @admin, MIN_ADMIN_BALANCE - 15000000);
+        aptos_coin::mint(&aptos_framework_account, @0xCAFE, state.ticket_price * 2);
+        coin::destroy_burn_cap(burn_cap);
+        coin::destroy_mint_cap(mint_cap);
+        assert!(coin::balance<AptosCoin>(@admin) == MIN_ADMIN_BALANCE - 15000000, 0);
+        assert!(coin::balance<AptosCoin>(signer::address_of(&player)) == state.ticket_price * 2, 0);
+
+        shoot(&player);
+
+        let state = borrow_global<State>(resource_account_address);
+        let shoot_deadline = *simple_map::borrow(&state.shoot_deadline_mapper, &signer::address_of(&player));
+        assert!(shoot_deadline == timestamp::now_seconds() + SHOOT_DURATION, 0);
+
+        assert!(coin::balance<AptosCoin>(resource_account_address) == 0, 0);
+        assert!(coin::balance<AptosCoin>(@admin) == MIN_ADMIN_BALANCE - 5000000, 0);
+        assert!(coin::balance<AptosCoin>(signer::address_of(&player)) == state.ticket_price, 0);
+
+        timestamp::fast_forward_seconds(SHOOT_DURATION + 1);
+
+        shoot(&player);
+
+        let state = borrow_global<State>(resource_account_address);
+        let shoot_deadline = *simple_map::borrow(&state.shoot_deadline_mapper, &signer::address_of(&player));
+        assert!(shoot_deadline == timestamp::now_seconds() + SHOOT_DURATION, 0);
+
+        let state = borrow_global<State>(resource_account_address);
+        assert!(event::counter(&state.event_handlers.shoot_events) == 2, 0);
+
+        assert!(coin::balance<AptosCoin>(resource_account_address) == 5000000, 0);
+        assert!(coin::balance<AptosCoin>(@admin) == MIN_ADMIN_BALANCE, 0);
+        assert!(coin::balance<AptosCoin>(signer::address_of(&player)) == 0, 0);
+    }
+
+    #[test]
     #[expected_failure(abort_code = EINSUFFICIENT_BALANCE)]
     fun test_shoot_1_apt_twice_failure_apt_not_enough() acquires State {
         let aptos_framework_account = account::create_account_for_test(@aptos_framework);
         timestamp::set_time_has_started_for_testing(&aptos_framework_account);
 
         let admin = account::create_account_for_test(@admin);
+        coin::register<AptosCoin>(&admin);
         init_module(&admin);
 
         let player = account::create_account_for_test(@0xCAFE);
@@ -594,6 +727,7 @@ module rtmtree::longshot_jackpot {
         assert!(state.ticket_price == 100000000, 0);
 
         let (burn_cap, mint_cap) = aptos_coin::initialize_for_test(&aptos_framework_account);
+        aptos_coin::mint(&aptos_framework_account, @admin, MIN_ADMIN_BALANCE);
         aptos_coin::mint(&aptos_framework_account, @0xCAFE, 100000000);
         coin::destroy_burn_cap(burn_cap);
         coin::destroy_mint_cap(mint_cap);
@@ -642,6 +776,7 @@ module rtmtree::longshot_jackpot {
         assert!(state.ticket_price == 100000000, 0);
 
         let (burn_cap, mint_cap) = aptos_coin::initialize_for_test(&aptos_framework_account);
+        aptos_coin::mint(&aptos_framework_account, @admin, MIN_ADMIN_BALANCE);
         aptos_coin::mint(&aptos_framework_account, @0xCAFE, 100000000 * 2);
         coin::destroy_burn_cap(burn_cap);
         coin::destroy_mint_cap(mint_cap);
@@ -676,7 +811,7 @@ module rtmtree::longshot_jackpot {
         let player_balance_after = coin::balance<AptosCoin>(signer::address_of(&player));
 
         assert!(player_balance_after - player_balance_before == reward, 0);
-        assert!(coin::balance<AptosCoin>(signer::address_of(&admin)) == admin_reward, 0);
+        assert!(coin::balance<AptosCoin>(signer::address_of(&admin)) == MIN_ADMIN_BALANCE + admin_reward, 0);
         assert!(coin::balance<AptosCoin>(resource_account_address) == all_balance - (reward + admin_reward), 0);
     }
 
