@@ -124,11 +124,13 @@ module rtmtree::longshot_jackpot {
         let resource_account_address = get_resource_account_address();
         let state = borrow_global_mut<State>(resource_account_address);
 
-        // Check if the player is already joined
-        if (simple_map::contains_key(&state.shoot_deadline_mapper, &signer::address_of(player))){
-            // Assert that the last shoot deadline is passed
-            assert!( *simple_map::borrow(&state.shoot_deadline_mapper, &signer::address_of(player)) < timestamp::now_seconds(), EDEADLINE_HAS_NOT_PASSED);
-        };
+        // === Uncomment this to let user wait til the deadline pass before reshoot ===
+        // // Check if the player is already joined
+        // if (simple_map::contains_key(&state.shoot_deadline_mapper, &signer::address_of(player))){
+        //     // Assert that the last shoot deadline is passed
+        //     assert!( *simple_map::borrow(&state.shoot_deadline_mapper, &signer::address_of(player)) < timestamp::now_seconds(), EDEADLINE_HAS_NOT_PASSED);
+        // };
+        // ============================================================================
 
         // Transfer ticket price to the resource account
         let ticket_price = state.ticket_price;
